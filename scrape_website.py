@@ -1,78 +1,72 @@
 import requests
-import configparser
-from xml.etree import ElementTree as ET
-
-config = configparser.ConfigParser()
-config.read('/home/cdsw/USER_START_HERE/Build_Your_Own_Knowledge_Base_Tools/Python-based_sitemap_scrape/cloudera_kb_config.conf')
-
 from bs4 import BeautifulSoup
-import re
-import os
-import requests
-from requests.exceptions import ConnectionError
-from requests import exceptions
+from urllib.parse import urljoin, urlparse
 import time
-from urllib.parse import urlparse, urljoin
+import os
 
-visited_urls = set()
+visited = set()
+to_visit = ['https://riversideca.gov/']
 max_retries = 5
-retry_delay_seconds = 2
+output_file = '/home/cdsw/data/downloads/urls_visited.txt'
 
-def get_tld(url):
-    parsed_url = urlparse(url)
-    return f"{parsed_url.scheme}://{parsed_url.netloc}"
+def is_valid_url(url):
+    parsed = urlparse(url)
+    return parsed.netloc.endswith('riversideca.gov')
 
-def create_directory_path_from_url(base_path, url):
-    url = url.replace("http:/", "").replace("https:/", "")
-    url_parts = url.strip('/').split('/')
-    directory_path = os.path.join(base_path, *url_parts[:-1])
-    file_name = f"{url_parts[-1]}.txt"
-    file_path = os.path.join(directory_path, file_name)
-    return directory_path, file_path
+def scrape_page(url, retries=0):
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.text
+        else:
+            if retries < max_retries:
+                print(f"Retrying {url} (attempt {retries + 1})")
+                time.sleep(1)
+                return scrape_page(url, retries + 1)
+            else:
+                print(f"Failed to retrieve {url} after {max_retries} attempts")
+                return None
+    except requests.RequestException as e:
+        if retries < max_retries:
+            print(f"Retrying {url} (attempt {retries + 1}) due to exception: {e}")
+            time.sleep(1)
+            return scrape_page(url, retries + 1)
+        else:
+            print(f"Failed to retrieve {url} after {max_retries} attempts due to exception: {e}")
+            return None
 
-def extract_and_write_text(url, base_path, tld):
-    if url in visited_urls or not url.startswith(tld):
-        return
-    visited_urls.add(url)
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            # Your API call or any HTTP request
-            response = requests.get(url)
-            
-            # If status code is good (e.g., 200), break the loop
-            if response.status_code == 200:
-                break
+def find_links(html, base_url):
+    soup = BeautifulSoup(html, 'html.parser')
+    links = set()
+    for tag in soup.find_all('a', href=True):
+        href = tag['href']
+        full_url = urljoin(base_url, href)
+        if is_valid_url(full_url) and full_url not in visited:
+            links.add(full_url)
+    return links
 
-        except:
-            print(f"Request attempt {attempt} failed with connection error.")
-            
-            # Sleep for a while before retrying
-            print(f"Retrying in {retry_delay_seconds} seconds...")
-            time.sleep(retry_delay_seconds)
-            
-    soup = BeautifulSoup(response.content, 'html.parser')
+# Ensure the output directory exists
+os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    main_content = soup.find('main')
+while to_visit:
+    current_url = to_visit.pop(0)
+    if current_url in visited:
+        continue
 
-    if url.endswith('.html'):
-        url = url[:-5]
+    print(f"Scraping: {current_url}")
+    html = scrape_page(current_url)
+    if html is None:
+        continue
 
-    directory_path, file_path = create_directory_path_from_url(base_path, url)
-    
-    os.makedirs(directory_path, exist_ok=True)
-    
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(soup.get_text())
+    visited.add(current_url)
+    new_links = find_links(html, current_url)
+    to_visit.extend(new_links)
 
-def main():
-    base_path = "/home/cdsw/data"
-    with open("/home/cdsw/USER_START_HERE/Build_Your_Own_Knowledge_Base_Tools/Python-based_sitemap_scrape/found_htmls.txt", "r") as file:
-        for line in file:
-            url = line.strip()
-            if url:
-                tld = get_tld(url)
-                extract_and_write_text(url, base_path, tld)
+    # Save the visited URL to the file
+    with open(output_file, 'a') as f:
+        f.write(current_url + '\n')
 
-if __name__ == '__main__':
-    main()
+    # To prevent overwhelming the server
+    time.sleep(1)
+
+print(f"Visited {len(visited)} pages.")
