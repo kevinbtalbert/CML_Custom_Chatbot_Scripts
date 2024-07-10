@@ -4,6 +4,8 @@ from urllib.parse import urljoin, urlparse
 import time
 import os
 
+## NOTE TO UPDATE BOTH to_visit and the domain mapping in is_valid_url
+
 visited = set()
 to_visit = ['https://riversideca.gov/']
 max_retries = 5
