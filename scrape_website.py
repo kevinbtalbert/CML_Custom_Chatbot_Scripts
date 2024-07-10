@@ -7,13 +7,14 @@ import os
 ## NOTE TO UPDATE BOTH to_visit and the domain mapping in is_valid_url
 
 visited = set()
-to_visit = ['https://riversideca.gov/']
+to_visit = ['https://ahca.myflorida.com/']
 max_retries = 5
-output_file = '/home/cdsw/data/downloads/urls_visited.txt'
+output_file = '/home/cdsw/urls_visited.txt'
+error_file = '/home/cdsw/url_errors.txt'
 
 def is_valid_url(url):
     parsed = urlparse(url)
-    return parsed.netloc.endswith('riversideca.gov')
+    return parsed.netloc.endswith('myflorida.com')
 
 def scrape_page(url, retries=0):
     try:
@@ -27,6 +28,7 @@ def scrape_page(url, retries=0):
                 return scrape_page(url, retries + 1)
             else:
                 print(f"Failed to retrieve {url} after {max_retries} attempts")
+                log_error(url, f"Failed after {max_retries} attempts with status code {response.status_code}")
                 return None
     except requests.RequestException as e:
         if retries < max_retries:
@@ -35,17 +37,26 @@ def scrape_page(url, retries=0):
             return scrape_page(url, retries + 1)
         else:
             print(f"Failed to retrieve {url} after {max_retries} attempts due to exception: {e}")
+            log_error(url, f"Exception: {e}")
             return None
 
 def find_links(html, base_url):
-    soup = BeautifulSoup(html, 'html.parser')
-    links = set()
-    for tag in soup.find_all('a', href=True):
-        href = tag['href']
-        full_url = urljoin(base_url, href)
-        if is_valid_url(full_url) and full_url not in visited:
-            links.add(full_url)
-    return links
+    try:
+        soup = BeautifulSoup(html, 'html.parser')
+        links = set()
+        for tag in soup.find_all('a', href=True):
+            href = tag['href']
+            full_url = urljoin(base_url, href)
+            if is_valid_url(full_url) and full_url not in visited:
+                links.add(full_url)
+        return links
+    except Exception as e:
+        log_error(base_url, f"Error parsing HTML: {e}")
+        return set()
+
+def log_error(url, message):
+    with open(error_file, 'a') as ef:
+        ef.write(f"{url}: {message}\n")
 
 # Ensure the output directory exists
 os.makedirs(os.path.dirname(output_file), exist_ok=True)
